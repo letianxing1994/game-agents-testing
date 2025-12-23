@@ -315,7 +315,9 @@ function InteractiveChatDialog({ onClose }: InteractiveChatDialogProps) {
             onKeyPress={handleKeyPress}
             placeholder={
               agentState?.currentQuestion ||
-              'Type your message to the agent...'
+              agentState?.status === 'waiting_for_user'
+                ? 'The agent is waiting for your response...'
+                : 'Type your message to the agent...'
             }
             rows={3}
             disabled={sending}
@@ -327,6 +329,14 @@ function InteractiveChatDialog({ onClose }: InteractiveChatDialogProps) {
           >
             {sending ? 'Sending...' : 'Send'}
           </button>
+        </div>
+      )}
+
+      {/* Debug info - remove in production */}
+      {process.env.NODE_ENV === 'development' && (
+        <div style={{ fontSize: '10px', padding: '5px', background: '#f0f0f0' }}>
+          Debug: currentAgent={currentAgent}, status={agentState?.status},
+          hasArtifact={!!agentState?.artifactForApproval}
         </div>
       )}
     </div>

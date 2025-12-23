@@ -101,11 +101,11 @@ export abstract class BaseAgent {
   protected handleA2AMessage(message: A2AMessage): void {
     console.log(`[${this.type}] Received message from ${message.from}:`, message.type);
 
+    // Don't auto-start on AGENT_START messages - agents should only start when
+    // explicitly called via agent.start() or when server triggers them after dependencies are met
     if (message.type === MessageType.AGENT_START) {
       this.messageQueue.push(message);
-      if (this.status === AgentStatus.IDLE) {
-        this.start(message.payload.data);
-      }
+      // Removed auto-start logic - agents are started explicitly by server based on dependencies
     } else if (message.type === MessageType.USER_MESSAGE) {
       this.userMessages.push(message.payload.content || '');
     } else if (message.type === MessageType.AGENT_COMPLETE && message.payload.artifactPath) {

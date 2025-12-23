@@ -473,8 +473,11 @@ app.post('/api/workflow/start', async (req, res) => {
     const agentsWithDependencies = agentConnections.map(conn => conn.to);
     const startingAgents = allAgents.filter(agent => !agentsWithDependencies.includes(agent));
 
+    console.log(`All agent connections:`, JSON.stringify(agentConnections));
+    console.log(`All agents: ${allAgents.join(', ')}`);
     console.log(`Agents with dependencies: ${agentsWithDependencies.join(', ')}`);
     console.log(`Starting agents (no dependencies): ${startingAgents.join(', ')}`);
+    console.log(`Starting ONLY these agents: ${JSON.stringify(startingAgents)}`);
 
     if (startingAgents.length === 0) {
       console.error('No starting agents found (all agents have dependencies - possible circular dependency)');
@@ -482,17 +485,19 @@ app.post('/api/workflow/start', async (req, res) => {
       return;
     }
 
-    // Start all agents with no dependencies
+    // Start ONLY agents with no dependencies
     for (const agentType of startingAgents) {
       const agent = getAgentByType(agentType as AgentType);
       if (agent) {
-        console.log(`Starting agent ${agentType}...`);
+        console.log(`>>> STARTING AGENT: ${agentType} <<<`);
         await agent.start({}, mode as 'automatic' | 'interactive');
-        console.log(`Agent ${agentType} started successfully`);
+        console.log(`>>> Agent ${agentType} started successfully <<<`);
       } else {
         console.error(`Agent ${agentType} not found or not initialized`);
       }
     }
+
+    console.log(`Workflow start completed. Should have started: ${startingAgents.join(', ')}`);
 
     executionState.currentAgentType = startingAgents[0]; // Set first as current
     await persistenceManager.saveExecutionState(executionState);
