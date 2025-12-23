@@ -1,0 +1,135 @@
+.app {
+  width: 100%;
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.app.with-chat .canvas-container {
+  margin-right: 500px;
+}
+
+.header {
+  background: #2a2a2a;
+  padding: 1rem 2rem;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  border-bottom: 2px solid #3a3a3a;
+  z-index: 10;
+}
+
+.header h1 {
+  font-size: 1.5rem;
+  margin: 0;
+  color: #4CAF50;
+}
+
+.controls {
+  display: flex;
+  gap: 1rem;
+}
+
+.btn {
+  padding: 0.5rem 1rem;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 0.9rem;
+  font-weight: 600;
+  transition: all 0.2s;
+}
+
+.btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.btn-primary {
+  background: #4CAF50;
+  color: white;
+}
+
+.btn-primary:hover:not(:disabled) {
+  background: #45a049;
+  transform: translateY(-1px);
+  box-shadow: 0 4px 8px rgba(76, 175, 80, 0.3);
+}
+
+.btn-interactive {
+  background: #9C27B0;
+  color: white;
+}
+
+.btn-interactive:hover:not(:disabled) {
+  background: #7B1FA2;
+  transform: translateY(-1px);
+  box-shadow: 0 4px 8px rgba(156, 39, 176, 0.3);
+}
+
+.btn-secondary {
+  background: #2196F3;
+  color: white;
+}
+
+.btn-secondary:hover:not(:disabled) {
+  background: #0b7dda;
+}
+
+.canvas-container {
+  flex: 1;
+  background: #1a1a1a;
+  position: relative;
+  transition: margin-right 0.3s ease;
+}
+
+.instructions {
+  background: #2a2a2a;
+  padding: 1rem 2rem;
+  border-top: 2px solid #3a3a3a;
+}
+
+.instructions p {
+  margin: 0 0 0.5rem 0;
+  color: #4CAF50;
+}
+
+.instructions ul {
+  margin: 0;
+  padding-left: 1.5rem;
+  color: #ccc;
+}
+
+.instructions li {
+  margin: 0.25rem 0;
+}
+
+.react-flow__node {
+  font-family: inherit;
+}
+
+.react-flow__edge-path {
+  stroke: #4CAF50;
+  stroke-width: 2;
+}
+
+.react-flow__edge.selected .react-flow__edge-path {
+  stroke: #45a049;
+}
+
+.react-flow__controls {
+  button {
+    background: #2a2a2a;
+    border-color: #3a3a3a;
+    color: white;
+  }
+
+  button:hover {
+    background: #3a3a3a;
+  }
+}
+
+.react-flow__minimap {
+  background: #2a2a2a;
+}
