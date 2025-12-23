@@ -171,8 +171,25 @@ export abstract class BaseAgent {
       this.currentWorkflow = savedWorkflow;
     }
 
-    // Main loop
-    while (!this.goalAchieved && this.status === AgentStatus.RUNNING) {
+    // Main loop - continue while not achieved goal and not in error state
+    while (!this.goalAchieved && this.status !== AgentStatus.ERROR) {
+      // Wait if in waiting states
+      if (this.status === AgentStatus.WAITING_FOR_USER) {
+        await new Promise(resolve => setTimeout(resolve, 1000));
+        continue;
+      }
+
+      if (this.status === AgentStatus.WAITING_FOR_APPROVAL) {
+        await new Promise(resolve => setTimeout(resolve, 1000));
+        continue;
+      }
+
+      // Only proceed if in RUNNING state
+      if (this.status !== AgentStatus.RUNNING) {
+        await new Promise(resolve => setTimeout(resolve, 1000));
+        continue;
+      }
+
       this.executionContext.iteration++;
 
       // In interactive mode on first iteration, wait for initial user input
@@ -190,19 +207,14 @@ export abstract class BaseAgent {
           },
         });
 
-        // Wait for user response
-        while (this.status === AgentStatus.WAITING_FOR_USER && this.userMessages.length === 0) {
-          await new Promise(resolve => setTimeout(resolve, 1000));
-        }
-
-        // Resume execution
-        this.status = AgentStatus.RUNNING;
+        // Continue loop, will wait at the top
+        continue;
       }
 
       this.executionContext.userMessages = [...this.userMessages];
       this.userMessages = []; // Clear consumed messages
 
-      // In interactive mode, check if we need to wait for user input
+      // In interactive mode, check if we need to wait for user input after first iteration
       if (this.executionMode === 'interactive' && this.executionContext.userMessages.length === 0 && this.executionContext.iteration > 1) {
         // Ask user for more information
         this.currentQuestion = 'Do you have any additional requirements or feedback?';
@@ -218,15 +230,8 @@ export abstract class BaseAgent {
           },
         });
 
-        // Wait for user response
-        while (this.status === AgentStatus.WAITING_FOR_USER) {
-          await new Promise(resolve => setTimeout(resolve, 1000));
-        }
-
-        // If user didn't provide input, continue anyway
-        if (this.executionContext.userMessages.length === 0) {
-          this.status = AgentStatus.RUNNING;
-        }
+        // Continue loop, will wait at the top
+        continue;
       }
 
       if (this.currentWorkflow) {
@@ -258,15 +263,8 @@ export abstract class BaseAgent {
           },
         });
 
-        // Wait for approval
-        while (this.status === AgentStatus.WAITING_FOR_APPROVAL) {
-          await new Promise(resolve => setTimeout(resolve, 1000));
-        }
-
-        // If not approved, continue iterating
-        if (!this.goalAchieved) {
-          this.status = AgentStatus.RUNNING;
-        }
+        // Continue loop, will wait at the top
+        continue;
       } else {
         // Send progress update
         this.sendA2AMessage({
