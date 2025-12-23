@@ -1,6 +1,7 @@
 import dotenv from 'dotenv';
 import { fileURLToPath } from 'url';
 import path from 'path';
+import WebSocket from 'ws';
 
 // Load environment variables from project root
 const __filename = fileURLToPath(import.meta.url);
@@ -15,7 +16,7 @@ import { PersistenceManager } from './storage/persistence.js';
 import { PlannerAgent } from './agents/planner-agent.js';
 import { ArtistAgent } from './agents/artist-agent.js';
 import { DeveloperAgent } from './agents/developer-agent.js';
-import { AgentType, AgentConnection } from './a2a/message-types.js';
+import { AgentType, AgentConnection, MessageType } from './a2a/message-types.js';
 import { Workflow } from './workflow/workflow-types.js';
 import { AgentConfig, WorkflowExecutionState } from './types/agent-config.js';
 
@@ -70,6 +71,75 @@ let executionState: WorkflowExecutionState = {
   artifactApprovals: {},
 };
 
+// WebSocket client for monitoring A2A messages
+let a2aMonitorClient: WebSocket | null = null;
+
+// Setup A2A message monitor to auto-start next agents
+function setupA2AMonitor() {
+  a2aMonitorClient = new WebSocket(`ws://localhost:${WS_PORT}`);
+
+  a2aMonitorClient.on('open', () => {
+    console.log('[Server] Connected to A2A server for monitoring');
+    a2aMonitorClient!.send(JSON.stringify({ type: 'register', agentType: 'server-monitor' }));
+  });
+
+  a2aMonitorClient.on('message', async (data: Buffer) => {
+    try {
+      const message = JSON.parse(data.toString());
+      if (message.type === 'a2a_message' && message.payload.type === MessageType.AGENT_COMPLETE) {
+        const completedAgentType = message.payload.from;
+        console.log(`\n[Server] Agent ${completedAgentType} completed, checking for next agents...`);
+
+        // Mark agent as completed
+        if (!executionState.completedNodes.includes(completedAgentType)) {
+          executionState.completedNodes.push(completedAgentType);
+          await persistenceManager.saveExecutionState(executionState);
+        }
+
+        // Find agents that depend on this completed agent
+        const nextAgents = agentConnections
+          .filter(conn => conn.from === completedAgentType)
+          .map(conn => conn.to);
+
+        console.log(`[Server] Next agents to check: ${nextAgents.join(', ')}`);
+
+        // Start next agents if all their dependencies are met
+        for (const nextAgentType of nextAgents) {
+          // Check if all dependencies for this agent are completed
+          const dependencies = agentConnections
+            .filter(conn => conn.to === nextAgentType)
+            .map(conn => conn.from);
+
+          const allDependenciesCompleted = dependencies.every(dep =>
+            executionState.completedNodes.includes(dep)
+          );
+
+          console.log(`[Server] Agent ${nextAgentType} dependencies: ${dependencies.join(', ')}`);
+          console.log(`[Server] All dependencies completed: ${allDependenciesCompleted}`);
+
+          if (allDependenciesCompleted) {
+            const agent = getAgentByType(nextAgentType as AgentType);
+            if (agent && agent.getStatus() === 'idle') {
+              console.log(`[Server] Starting next agent: ${nextAgentType}`);
+              executionState.currentAgentType = nextAgentType;
+              await persistenceManager.saveExecutionState(executionState);
+              await agent.start({}, executionState.mode as 'automatic' | 'interactive');
+            }
+          } else {
+            console.log(`[Server] Agent ${nextAgentType} waiting for dependencies`);
+          }
+        }
+      }
+    } catch (error) {
+      console.error('[Server] Failed to process A2A message:', error);
+    }
+  });
+
+  a2aMonitorClient.on('error', (error) => {
+    console.error('[Server] A2A monitor error:', error);
+  });
+}
+
 // API Routes
 
 // Health check
@@ -106,6 +176,11 @@ app.post('/api/agents/initialize', async (req, res) => {
       artistAgent.connectToA2A(),
       developerAgent.connectToA2A(),
     ]);
+
+    // Setup server monitor to listen for agent completion and auto-start next agents
+    if (!a2aMonitorClient) {
+      setupA2AMonitor();
+    }
 
     res.json({ success: true, message: 'Agents initialized successfully' });
   } catch (error: any) {
@@ -393,37 +468,41 @@ app.post('/api/workflow/start', async (req, res) => {
 
     await persistenceManager.saveExecutionState(executionState);
 
-    // Start first agent in topology
-    const sortedAgents = topologicalSort();
-    console.log(`Sorted agents: ${sortedAgents.join(' -> ')}`);
+    // Find agents with no dependencies (no incoming edges)
+    const allAgents = ['planner', 'artist', 'developer'];
+    const agentsWithDependencies = agentConnections.map(conn => conn.to);
+    const startingAgents = allAgents.filter(agent => !agentsWithDependencies.includes(agent));
 
-    if (sortedAgents.length > 0) {
-      const firstAgent = sortedAgents[0];
-      console.log(`First agent: ${firstAgent}`);
-      executionState.currentAgentType = firstAgent;
-      await persistenceManager.saveExecutionState(executionState);
+    console.log(`Agents with dependencies: ${agentsWithDependencies.join(', ')}`);
+    console.log(`Starting agents (no dependencies): ${startingAgents.join(', ')}`);
 
-      const agent = getAgentByType(firstAgent as AgentType);
-      if (agent) {
-        console.log(`Starting agent ${firstAgent}...`);
-        // In both modes, we start the agent
-        // In interactive mode, it will wait for user input in the ReAct loop
-        await agent.start({}, mode as 'automatic' | 'interactive');
-        console.log(`Agent ${firstAgent} started successfully`);
-
-        res.json({
-          success: true,
-          message: `Workflow started in ${mode} mode`,
-          currentAgent: firstAgent,
-        });
-      } else {
-        console.error(`First agent ${firstAgent} not found`);
-        res.status(404).json({ error: 'First agent not found' });
-      }
-    } else {
-      console.error('No agents connected');
-      res.status(400).json({ error: 'No agents connected' });
+    if (startingAgents.length === 0) {
+      console.error('No starting agents found (all agents have dependencies - possible circular dependency)');
+      res.status(400).json({ error: 'No starting agents found' });
+      return;
     }
+
+    // Start all agents with no dependencies
+    for (const agentType of startingAgents) {
+      const agent = getAgentByType(agentType as AgentType);
+      if (agent) {
+        console.log(`Starting agent ${agentType}...`);
+        await agent.start({}, mode as 'automatic' | 'interactive');
+        console.log(`Agent ${agentType} started successfully`);
+      } else {
+        console.error(`Agent ${agentType} not found or not initialized`);
+      }
+    }
+
+    executionState.currentAgentType = startingAgents[0]; // Set first as current
+    await persistenceManager.saveExecutionState(executionState);
+
+    res.json({
+      success: true,
+      message: `Workflow started in ${mode} mode`,
+      currentAgent: startingAgents[0],
+      startedAgents: startingAgents,
+    });
   } catch (error: any) {
     console.error('Error starting workflow:', error);
     console.error('Error stack:', error.stack);
@@ -585,5 +664,8 @@ process.on('SIGINT', () => {
   plannerAgent?.disconnect();
   artistAgent?.disconnect();
   developerAgent?.disconnect();
+  if (a2aMonitorClient) {
+    a2aMonitorClient.close();
+  }
   process.exit(0);
 });

@@ -36,6 +36,7 @@ export abstract class BaseAgent {
   protected currentQuestion: string | null = null;
   protected artifactForApproval: any = null;
   protected agentConfig: any = null; // Store agent configuration including scenario
+  protected askedForInitialInput: boolean = false; // Track if we've asked for initial input
 
   constructor(
     type: AgentType,
@@ -173,7 +174,7 @@ export abstract class BaseAgent {
 
     // Main loop - continue while not achieved goal and not in error state
     while (!this.goalAchieved && this.status !== AgentStatus.ERROR) {
-      // Wait if in waiting states
+      // Wait if in waiting states - block here without doing anything else
       if (this.status === AgentStatus.WAITING_FOR_USER) {
         await new Promise(resolve => setTimeout(resolve, 1000));
         continue;
@@ -190,10 +191,9 @@ export abstract class BaseAgent {
         continue;
       }
 
-      this.executionContext.iteration++;
-
-      // In interactive mode on first iteration, wait for initial user input
-      if (this.executionMode === 'interactive' && this.executionContext.iteration === 1 && this.userMessages.length === 0) {
+      // In interactive mode, ask for initial user input ONCE
+      if (this.executionMode === 'interactive' && !this.askedForInitialInput && this.userMessages.length === 0) {
+        this.askedForInitialInput = true; // Set flag to prevent re-asking
         this.currentQuestion = 'Please provide your initial requirements to begin.';
         this.status = AgentStatus.WAITING_FOR_USER;
 
@@ -207,32 +207,16 @@ export abstract class BaseAgent {
           },
         });
 
+        console.log(`[${this.type}] Waiting for initial user input...`);
         // Continue loop, will wait at the top
         continue;
       }
+
+      // Increment iteration only when actually executing
+      this.executionContext.iteration++;
 
       this.executionContext.userMessages = [...this.userMessages];
       this.userMessages = []; // Clear consumed messages
-
-      // In interactive mode, check if we need to wait for user input after first iteration
-      if (this.executionMode === 'interactive' && this.executionContext.userMessages.length === 0 && this.executionContext.iteration > 1) {
-        // Ask user for more information
-        this.currentQuestion = 'Do you have any additional requirements or feedback?';
-        this.status = AgentStatus.WAITING_FOR_USER;
-
-        this.sendA2AMessage({
-          type: MessageType.AGENT_PROGRESS,
-          from: this.type,
-          to: 'all',
-          payload: {
-            content: this.currentQuestion,
-            data: { status: 'waiting_for_user', question: this.currentQuestion },
-          },
-        });
-
-        // Continue loop, will wait at the top
-        continue;
-      }
 
       if (this.currentWorkflow) {
         // Execute custom workflow
@@ -263,6 +247,7 @@ export abstract class BaseAgent {
           },
         });
 
+        console.log(`[${this.type}] Waiting for artifact approval...`);
         // Continue loop, will wait at the top
         continue;
       } else {
