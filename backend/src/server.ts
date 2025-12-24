@@ -534,38 +534,32 @@ app.post('/api/workflow/respond', async (req, res) => {
 
     // Handle artifact approval
     if (approveArtifact !== undefined) {
+      const agentStatus = agent.getStatus();
+      console.log(`[Server] Approving artifact for ${agentType}, current status: ${agentStatus}`);
+
+      // Check if agent is in the correct state for approval
+      if (agentStatus !== 'waiting_for_approval') {
+        console.log(`[Server] Agent ${agentType} not waiting for approval (status: ${agentStatus}), ignoring request`);
+        return res.json({
+          success: true,
+          message: 'Agent is not waiting for approval',
+          status: agentStatus
+        });
+      }
+
       await (agent as any).approveArtifact(approveArtifact);
       executionState.artifactApprovals[agentType] = approveArtifact;
 
       if (approveArtifact) {
-        // Move to next agent
-        executionState.completedNodes.push(agentType);
-
-        const sortedAgents = topologicalSort();
-        const currentIndex = sortedAgents.indexOf(agentType);
-        if (currentIndex >= 0 && currentIndex < sortedAgents.length - 1) {
-          const nextAgent = sortedAgents[currentIndex + 1];
-          executionState.currentAgentType = nextAgent;
-
-          // Start next agent in interactive mode
-          const nextAgentInstance = getAgentByType(nextAgent as AgentType);
-          if (nextAgentInstance) {
-            // Don't auto-start, wait for user to initiate conversation
-            res.json({
-              success: true,
-              message: 'Moving to next agent',
-              nextAgent,
-            });
-          } else {
-            res.status(404).json({ error: 'Next agent not found' });
-          }
-        } else {
-          // Workflow completed
-          executionState.currentAgentType = null;
-          res.json({ success: true, message: 'Workflow completed' });
-        }
+        console.log(`[Server] Artifact approved for ${agentType}, will complete and trigger next agent via A2A`);
+        // Don't manually start next agent - let A2A monitor handle it automatically
+        // when AGENT_COMPLETE message is received
+        res.json({
+          success: true,
+          message: 'Artifact approved. Agent will complete and next agent will start automatically.',
+        });
       } else {
-        // User rejected artifact, agent will continue iterating
+        console.log(`[Server] Artifact rejected for ${agentType}, agent will continue iterating`);
         res.json({ success: true, message: 'Agent will continue iterating' });
       }
 
@@ -574,6 +568,7 @@ app.post('/api/workflow/respond', async (req, res) => {
       res.json({ success: true, message: 'No action specified' });
     }
   } catch (error: any) {
+    console.error('[Server] Error in /api/workflow/respond:', error);
     res.status(500).json({ error: error.message });
   }
 });

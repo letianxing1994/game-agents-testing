@@ -108,6 +108,31 @@ export abstract class BaseAgent {
       // Removed auto-start logic - agents are started explicitly by server based on dependencies
     } else if (message.type === MessageType.USER_MESSAGE) {
       this.userMessages.push(message.payload.content || '');
+      // If agent is waiting for user, resume execution
+      if (this.status === AgentStatus.WAITING_FOR_USER) {
+        this.status = AgentStatus.RUNNING;
+        this.currentQuestion = null;
+      }
+    } else if (message.type === MessageType.ARTIFACT_APPROVAL) {
+      // Handle artifact approval via WebSocket message
+      const approved = message.payload.data?.approved;
+      console.log(`[${this.type}] Received artifact approval via WebSocket: ${approved}`);
+      console.log(`[${this.type}] Current status: ${this.status}`);
+
+      if (this.status === AgentStatus.WAITING_FOR_APPROVAL) {
+        if (approved) {
+          console.log(`[${this.type}] Artifact APPROVED - will complete task`);
+          this.goalAchieved = true;
+          this.status = AgentStatus.RUNNING; // Will complete in next iteration
+        } else {
+          console.log(`[${this.type}] Artifact REJECTED - will continue iterating`);
+          this.goalAchieved = false;
+          this.status = AgentStatus.RUNNING; // Will continue iterating
+          this.artifactForApproval = null;
+        }
+      } else {
+        console.log(`[${this.type}] Ignoring approval - agent not in WAITING_FOR_APPROVAL state (current: ${this.status})`);
+      }
     } else if (message.type === MessageType.AGENT_COMPLETE && message.payload.artifactPath) {
       this.executionContext.previousArtifacts[message.from] = message.payload.artifactPath;
     }
@@ -152,9 +177,8 @@ export abstract class BaseAgent {
       payload: { content: `${this.type} agent started in ${this.executionMode} mode` },
     });
 
-    try {
-      await this.run();
-    } catch (error: any) {
+    // Run in background - don't await so the start() method returns immediately
+    this.run().catch((error: any) => {
       this.status = AgentStatus.ERROR;
       this.sendA2AMessage({
         type: MessageType.AGENT_ERROR,
@@ -162,7 +186,10 @@ export abstract class BaseAgent {
         to: 'all',
         payload: { error: error.message },
       });
-    }
+    });
+
+    // Return immediately so the API endpoint doesn't block
+    console.log(`[${this.type}] Start method returning immediately, run() executing in background`);
   }
 
   protected async run(): Promise<void> {
@@ -332,17 +359,22 @@ export abstract class BaseAgent {
       this.tools
     );
 
-    // Set progress callback to send updates
+    // Set progress callback to send updates AND update history in real-time
     reactExecutor.setProgressCallback((step) => {
+      // Add step to history immediately for real-time streaming
+      this.executionContext.history.push(step);
+      console.log(`[${this.type}] ReAct step ${this.executionContext.history.length}:`, step.thought.substring(0, 80));
+
       this.sendA2AMessage({
         type: MessageType.AGENT_PROGRESS,
         from: this.type,
         to: 'all',
         payload: {
-          content: 'ReAct step executed',
+          content: `Step ${this.executionContext.history.length}: ${step.thought.substring(0, 100)}...`,
           data: {
             step: step,
             iteration: this.executionContext.iteration,
+            historyLength: this.executionContext.history.length,
           },
         },
       });
@@ -352,7 +384,7 @@ export abstract class BaseAgent {
 
     if (result.success) {
       this.executionContext.variables.output = result.result;
-      this.executionContext.history.push(...result.steps);
+      // History is already updated by progressCallback in real-time, no need to push again
     } else {
       throw new Error(result.result);
     }
@@ -398,13 +430,15 @@ export abstract class BaseAgent {
   }
 
   async sendUserMessage(message: string): Promise<void> {
-    this.userMessages.push(message);
+    console.log(`[${this.type}] Received user message: ${message.substring(0, 50)}...`);
 
-    // If agent is waiting for user, resume execution
-    if (this.status === AgentStatus.WAITING_FOR_USER) {
-      this.status = AgentStatus.RUNNING;
-      this.currentQuestion = null;
-    }
+    // Send message via A2A to ensure it's handled through the standard message flow
+    this.sendA2AMessage({
+      type: MessageType.USER_MESSAGE,
+      from: 'user',
+      to: this.type,
+      payload: { content: message },
+    });
   }
 
   async approveArtifact(approved: boolean): Promise<void> {

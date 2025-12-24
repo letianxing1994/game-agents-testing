@@ -9,6 +9,7 @@ export enum MessageType {
   AGENT_PROGRESS = 'agent_progress',
   USER_MESSAGE = 'user_message',
   SYSTEM_MESSAGE = 'system_message',
+  ARTIFACT_APPROVAL = 'artifact_approval',
 }
 
 export enum AgentType {

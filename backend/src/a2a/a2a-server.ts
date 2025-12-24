@@ -78,9 +78,18 @@ export class A2AServer {
     console.log(`Routing message from ${message.from} to ${message.to}`);
 
     if (message.to === 'all') {
-      // Broadcast to all agents
-      for (const agentType of Object.values(AgentType)) {
-        this.deliverMessage(agentType, message);
+      // Broadcast to ALL connected clients (agents + UI clients)
+      const clientCount = this.clients.size;
+      console.log(`Broadcasting to ${clientCount} connected clients`);
+
+      // Debug: show registered agent types
+      const registeredAgents = Array.from(this.agentClients.entries()).map(([type, id]) => type);
+      console.log(`Registered agents: ${registeredAgents.join(', ')}`);
+
+      for (const [clientId, ws] of this.clients.entries()) {
+        if (ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({ type: 'a2a_message', payload: message }));
+        }
       }
     } else {
       // Send to specific agent

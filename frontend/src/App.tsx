@@ -61,9 +61,77 @@ function App() {
   // Initialize agents on mount
   useEffect(() => {
     initializeAgents();
-    const interval = setInterval(updateAgentStatuses, 2000);
-    return () => clearInterval(interval);
   }, []);
+
+  // WebSocket connection for real-time agent status updates
+  useEffect(() => {
+    console.log('[App] Connecting to WebSocket for status updates...');
+    const ws = new WebSocket('ws://localhost:3001');
+
+    ws.onopen = () => {
+      console.log('[App] WebSocket connected for status updates');
+      ws.send(JSON.stringify({ type: 'register', agentType: 'app-status-monitor' }));
+    };
+
+    ws.onmessage = (event) => {
+      try {
+        const message = JSON.parse(event.data);
+        console.log('[App] Received WebSocket message:', message);
+
+        if (message.type === 'a2a_message') {
+          const payload = message.payload;
+          console.log('[App] A2A message type:', payload.type, 'from:', payload.from);
+
+          // Update agent status based on A2A messages
+          if (payload.type === 'agent_start') {
+            console.log('[App] Updating agent status to running:', payload.from);
+            updateAgentStatus(payload.from, 'running');
+          } else if (payload.type === 'agent_complete') {
+            console.log('[App] Updating agent status to completed:', payload.from);
+            updateAgentStatus(payload.from, 'completed');
+          } else if (payload.type === 'agent_error') {
+            console.log('[App] Updating agent status to error:', payload.from);
+            updateAgentStatus(payload.from, 'error');
+          } else if (payload.type === 'agent_progress') {
+            // Check status in payload data
+            if (payload.data?.status) {
+              console.log('[App] Updating agent status from progress:', payload.from, payload.data.status);
+              updateAgentStatus(payload.from, payload.data.status);
+            }
+          }
+        }
+      } catch (error) {
+        console.error('[App] WebSocket message error:', error);
+      }
+    };
+
+    ws.onerror = (error) => {
+      console.error('[App] WebSocket error:', error);
+    };
+
+    ws.onclose = () => {
+      console.log('[App] WebSocket disconnected');
+    };
+
+    return () => {
+      console.log('[App] Closing WebSocket');
+      ws.close();
+    };
+  }, []);
+
+  const updateAgentStatus = (agentType: string, status: string) => {
+    setNodes((nds) =>
+      nds.map((node) => {
+        if (node.id === agentType) {
+          return {
+            ...node,
+            data: { ...node.data, status },
+          };
+        }
+        return node;
+      })
+    );
+  };
 
   // Update agent connections when edges change
   useEffect(() => {
@@ -79,32 +147,6 @@ function App() {
       console.log('Agents initialized');
     } catch (error) {
       console.error('Failed to initialize agents:', error);
-    }
-  };
-
-  const updateAgentStatuses = async () => {
-    try {
-      const statuses = await Promise.all([
-        axios.get('/api/agents/planner/status'),
-        axios.get('/api/agents/artist/status'),
-        axios.get('/api/agents/developer/status'),
-      ]);
-
-      setNodes((nds) =>
-        nds.map((node) => {
-          const statusMap: Record<string, string> = {
-            planner: statuses[0].data.status,
-            artist: statuses[1].data.status,
-            developer: statuses[2].data.status,
-          };
-          return {
-            ...node,
-            data: { ...node.data, status: statusMap[node.id] },
-          };
-        })
-      );
-    } catch (error) {
-      // Ignore errors during status update
     }
   };
 
@@ -177,6 +219,8 @@ function App() {
       return;
     }
 
+    // Ensure connections are up-to-date before showing dialog
+    updateConnections();
     setShowInteractiveChat(true);
   };
 
@@ -277,7 +321,10 @@ function App() {
       )}
 
       {showInteractiveChat && (
-        <InteractiveChatDialog onClose={() => setShowInteractiveChat(false)} />
+        <InteractiveChatDialog
+          onClose={() => setShowInteractiveChat(false)}
+          edges={edges}
+        />
       )}
     </div>
   );
